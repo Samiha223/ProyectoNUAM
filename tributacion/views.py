@@ -22,7 +22,7 @@ def es_corredor(user):
 
 def obtener_datos_serializables(obj):
     """
-    Serializa una instancia de CalificacionTributaria a un diccionario para logs.
+    Serializa  sasqdsada una instancia de CalificacionTributaria a un diccionario para logs.
     """
     if not obj:
         return None
