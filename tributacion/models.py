@@ -41,6 +41,10 @@ class CalificacionTributaria(models.Model):
     tipo_sociedad = models.CharField(max_length=1)  # 'A' o 'C'
     valor_historico = models.DecimalField(max_digits=18, decimal_places=4)
     fuente_ingreso = models.CharField(max_length=50)  # 'Manual', 'Carga Masiva Factores', etc.
+    descripcion = models.CharField(max_length=255, blank=True, null=True)
+    isfut = models.BooleanField(default=False)
+    factor_actualizacion = models.DecimalField(max_digits=18, decimal_places=8, default=Decimal('0.00000000'))
+    corredor_propietario = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='calificaciones')
 
     # Factores del 8 al 37 (precisión de 9 dígitos y 8 decimales)
     factor_8 = models.DecimalField(max_digits=9, decimal_places=8, default=Decimal('0.00000000'))
@@ -90,7 +94,7 @@ class CalificacionTributaria(models.Model):
 
     class Meta:
         db_table = 'calificacion_tributaria'
-        unique_together = ('ejercicio', 'instrumento', 'secuencia')
+        unique_together = ('ejercicio', 'instrumento', 'secuencia', 'corredor_propietario')
         verbose_name = 'Calificación Tributaria'
         verbose_name_plural = 'Calificaciones Tributarias'
         constraints = [

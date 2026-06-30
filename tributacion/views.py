@@ -39,6 +39,10 @@ def obtener_datos_serializables(obj):
         'tipo_sociedad': obj.tipo_sociedad,
         'valor_historico': str(obj.valor_historico),
         'fuente_ingreso': obj.fuente_ingreso,
+        'descripcion': obj.descripcion,
+        'isfut': obj.isfut,
+        'factor_actualizacion': str(obj.factor_actualizacion),
+        'corredor_propietario_id': obj.corredor_propietario_id,
     }
     # Agregar factores
     for i in range(8, 38):
@@ -104,10 +108,19 @@ def buscar_calificaciones(request):
     if ejercicio:
         queryset = queryset.filter(ejercicio=ejercicio)
 
+    from django.db.models import Q
+    queryset = queryset.filter(Q(corredor_propietario__isnull=True) | Q(corredor_propietario=request.user))
+    
     queryset = queryset.order_by('-ejercicio', 'instrumento__nemotecnico', 'secuencia')
 
-    datos = []
+    registros_finales = {}
     for item in queryset:
+        key = (item.ejercicio, item.instrumento_id, item.secuencia)
+        if key not in registros_finales or item.corredor_propietario_id == request.user.id:
+            registros_finales[key] = item
+
+    datos = []
+    for item in registros_finales.values():
         datos.append({
             'id': item.id,
             'ejercicio': item.ejercicio,
@@ -121,6 +134,10 @@ def buscar_calificaciones(request):
             'tipo_sociedad': item.tipo_sociedad,
             'valor_historico': float(item.valor_historico),
             'fuente_ingreso': item.fuente_ingreso,
+            'descripcion': item.descripcion,
+            'isfut': item.isfut,
+            'factor_actualizacion': float(item.factor_actualizacion),
+            'es_local': item.corredor_propietario_id == request.user.id,
             'factor_8_19_sum': float(
                 item.factor_8 + item.factor_9 + item.factor_10 + item.factor_11 +
                 item.factor_12 + item.factor_13 + item.factor_14 + item.factor_15 +
@@ -151,7 +168,10 @@ def guardar_calificacion(request):
         secuencia = int(data.get('secuencia'))
         nro_dividendo = int(data.get('nro_dividendo'))
         tipo_sociedad = data.get('tipo_sociedad')
-        valor_historico = Decimal(str(data.get('valor_historico')))
+        valor_historico = Decimal(str(data.get('valor_historico') or '0'))
+        descripcion = data.get('descripcion')
+        isfut = bool(data.get('isfut'))
+        factor_actualizacion = Decimal(str(data.get('factor_actualizacion') or '0'))
 
         if not fecha_pago:
             return JsonResponse({'success': False, 'error': 'Fecha de pago inválida'}, status=400)
@@ -161,10 +181,20 @@ def guardar_calificacion(request):
 
         # Crear o recuperar instancia
         if registro_id:
-            obj = CalificacionTributaria.objects.get(id=registro_id)
-            datos_previos = obtener_datos_serializables(obj)
-            accion = "Edición manual de Calificación"
-            tipo_operacion = "UPDATE"
+            obj_existente = CalificacionTributaria.objects.get(id=registro_id)
+            if obj_existente.corredor_propietario_id is None:
+                # Es de bolsa, no podemos modificarla, creamos una copia local
+                obj = CalificacionTributaria()
+                datos_previos = obtener_datos_serializables(obj_existente)
+                accion = "Creación de copia local desde Bolsa"
+                tipo_operacion = "INSERT"
+            else:
+                if obj_existente.corredor_propietario_id != request.user.id:
+                    return JsonResponse({'success': False, 'error': 'No puedes editar un registro que no te pertenece'}, status=403)
+                obj = obj_existente
+                datos_previos = obtener_datos_serializables(obj)
+                accion = "Edición manual de Calificación local"
+                tipo_operacion = "UPDATE"
         else:
             obj = CalificacionTributaria()
             datos_previos = None
@@ -179,7 +209,11 @@ def guardar_calificacion(request):
         obj.nro_dividendo = nro_dividendo
         obj.tipo_sociedad = tipo_sociedad
         obj.valor_historico = valor_historico
+        obj.descripcion = descripcion
+        obj.isfut = isfut
+        obj.factor_actualizacion = factor_actualizacion
         obj.fuente_ingreso = 'Manual'
+        obj.corredor_propietario = request.user
 
         # Asignar montos si existen
         tiene_montos = False
@@ -246,6 +280,8 @@ def eliminar_calificacion(request):
             return JsonResponse({'success': False, 'error': 'ID del registro no proporcionado'}, status=400)
 
         obj = CalificacionTributaria.objects.get(id=registro_id)
+        if obj.corredor_propietario_id != request.user.id:
+            return JsonResponse({'success': False, 'error': 'Solo puedes eliminar tus propias calificaciones locales.'}, status=403)
         datos_previos = obtener_datos_serializables(obj)
 
         # Eliminar el objeto
@@ -308,6 +344,9 @@ def previsualizar_csv(request):
                 nro_dividendo = int(fila['nro_dividendo'])
                 tipo_sociedad = fila['tipo_sociedad'].strip().upper()
                 valor_historico = Decimal(fila['valor_historico'])
+                descripcion = fila.get('descripcion', '').strip()
+                isfut = str(fila.get('isfut', '0')).strip().lower() in ['1', 'true', 'si', 'sí', 's']
+                factor_actualizacion = Decimal(fila.get('factor_actualizacion', '0') or '0')
 
                 # Buscar instrumento
                 try:
@@ -376,6 +415,9 @@ def previsualizar_csv(request):
                     'nro_dividendo': nro_dividendo,
                     'tipo_sociedad': tipo_sociedad,
                     'valor_historico': float(valor_historico),
+                    'descripcion': descripcion,
+                    'isfut': isfut,
+                    'factor_actualizacion': float(factor_actualizacion),
                     'factores': factores,
                     'montos': montos if tipo_carga == 'montos' else None
                 })
@@ -417,11 +459,12 @@ def confirmar_carga_masiva(request):
             secuencia = int(item['secuencia'])
             mercado_id = int(item['mercado_id'])
 
-            # Buscar si ya existe la clave única (ejercicio, instrumento_id, secuencia)
+            # Buscar si ya existe la clave única local del corredor
             existing_obj = CalificacionTributaria.objects.filter(
                 ejercicio=ejercicio,
                 instrumento_id=instrumento_id,
-                secuencia=secuencia
+                secuencia=secuencia,
+                corredor_propietario=request.user
             ).first()
 
             if existing_obj:
@@ -432,6 +475,9 @@ def confirmar_carga_masiva(request):
                 obj.nro_dividendo = int(item['nro_dividendo'])
                 obj.tipo_sociedad = item['tipo_sociedad']
                 obj.valor_historico = Decimal(str(item['valor_historico']))
+                obj.descripcion = item.get('descripcion', '')
+                obj.isfut = item.get('isfut', False)
+                obj.factor_actualizacion = Decimal(str(item.get('factor_actualizacion', '0')))
                 obj.mercado_id = mercado_id
                 obj.fuente_ingreso = fuente
                 upserts_count += 1
@@ -449,7 +495,11 @@ def confirmar_carga_masiva(request):
                     nro_dividendo=int(item['nro_dividendo']),
                     tipo_sociedad=item['tipo_sociedad'],
                     valor_historico=Decimal(str(item['valor_historico'])),
-                    fuente_ingreso=fuente
+                    descripcion=item.get('descripcion', ''),
+                    isfut=item.get('isfut', False),
+                    factor_actualizacion=Decimal(str(item.get('factor_actualizacion', '0'))),
+                    fuente_ingreso=fuente,
+                    corredor_propietario=request.user
                 )
                 inserts_count += 1
                 tipo_operacion = "INSERT"
