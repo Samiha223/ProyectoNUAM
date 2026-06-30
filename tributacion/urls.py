@@ -11,4 +11,6 @@ urlpatterns = [
     path('api/csv/previsualizar/', views.previsualizar_csv, name='previsualizar_csv'),
     path('api/csv/confirmar/', views.confirmar_carga_masiva, name='confirmar_carga_masiva'),
     path('api/logs/', views.ver_logs, name='ver_logs'),
+    path('api/corredores/crear/', views.crear_corredor, name='crear_corredor'),
+    path('api/corredores/password/', views.cambiar_password_inicial, name='cambiar_password_inicial'),
 ]

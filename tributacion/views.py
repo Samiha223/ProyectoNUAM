@@ -11,7 +11,8 @@ from django.core.exceptions import ValidationError
 from django.utils.dateparse import parse_date
 from django.db.models import F
 
-from tributacion.models import Mercado, Instrumento, CalificacionTributaria, AuditoriaLog
+from tributacion.models import Mercado, Instrumento, CalificacionTributaria, AuditoriaLog, PerfilUsuario
+from django.contrib.auth.models import User, Group
 
 # Helpers para control de acceso RBAC
 def es_administrador(user):
@@ -61,10 +62,57 @@ def login_usuario(request):
         password = data.get('password')
         user = authenticate(request, username=username, password=password)
         if user is not None:
+            if hasattr(user, 'perfil') and user.perfil.cambio_password_obligatorio:
+                return JsonResponse({'success': True, 'require_password_change': True, 'username': username})
+            
             login(request, user)
             return JsonResponse({'success': True})
         return JsonResponse({'success': False, 'error': 'Credenciales inválidas'}, status=400)
     return render(request, 'tributacion/login.html')
+
+@login_required
+def crear_corredor(request):
+    if not es_administrador(request.user):
+        return JsonResponse({'success': False, 'error': 'No autorizado'}, status=403)
+        
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        nombre = data.get('nombre')
+        correo = data.get('correo')
+        
+        if User.objects.filter(username=correo).exists():
+            return JsonResponse({'success': False, 'error': 'Ya existe un usuario con este correo'}, status=400)
+            
+        try:
+            user = User.objects.create_user(username=correo, email=correo, password='Temporal123', first_name=nombre)
+            corredor_group, _ = Group.objects.get_or_create(name='Corredor de Bolsa')
+            user.groups.add(corredor_group)
+            PerfilUsuario.objects.create(user=user, cambio_password_obligatorio=True)
+            return JsonResponse({'success': True, 'message': 'Corredor creado exitosamente'})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+    return JsonResponse({'success': False, 'error': 'Método no permitido'}, status=405)
+
+def cambiar_password_inicial(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        username = data.get('username')
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        
+        user = authenticate(request, username=username, password=current_password)
+        if user is not None and hasattr(user, 'perfil') and user.perfil.cambio_password_obligatorio:
+            user.set_password(new_password)
+            user.save()
+            
+            perfil = user.perfil
+            perfil.cambio_password_obligatorio = False
+            perfil.save()
+            
+            login(request, user)
+            return JsonResponse({'success': True})
+        return JsonResponse({'success': False, 'error': 'Credenciales inválidas o no requiere cambio de contraseña'}, status=400)
+    return JsonResponse({'success': False, 'error': 'Método no permitido'}, status=405)
 
 
 def logout_usuario(request):

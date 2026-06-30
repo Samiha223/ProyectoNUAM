@@ -110,6 +110,26 @@
             <button type="submit" class="btn btn-primary-custom w-100 text-white">Ingresar al Sistema</button>
         </form>
 
+        <form id="passwordChangeForm" method="POST" class="d-none">
+            {% csrf_token %}
+            <div class="alert alert-warning small">
+                Este es su primer ingreso. Por seguridad, debe crear una contraseña nueva.
+            </div>
+            <input type="hidden" id="pc_username">
+            <input type="hidden" id="pc_current_password">
+            <div class="mb-3">
+                <label for="new_password" class="form-label small text-secondary">Nueva Contraseña</label>
+                <input type="password" class="form-control form-control-custom" id="new_password" required
+                    placeholder="Escriba su nueva clave">
+            </div>
+            <div class="mb-4">
+                <label for="new_password_confirm" class="form-label small text-secondary">Confirmar Contraseña</label>
+                <input type="password" class="form-control form-control-custom" id="new_password_confirm" required
+                    placeholder="Repita la clave">
+            </div>
+            <button type="submit" class="btn btn-primary-custom w-100 text-white">Guardar e Ingresar</button>
+        </form>
+
 
     </div>
 
@@ -140,9 +160,63 @@
 
                 const result = await response.json();
                 if (response.ok && result.success) {
-                    window.location.href = '{% url "index" %}';
+                    if (result.require_password_change) {
+                        // Mostrar form de cambio de clave
+                        document.getElementById('loginForm').classList.add('d-none');
+                        document.getElementById('passwordChangeForm').classList.remove('d-none');
+                        document.getElementById('pc_username').value = result.username;
+                        document.getElementById('pc_current_password').value = data.password;
+                    } else {
+                        window.location.href = '{% url "index" %}';
+                    }
                 } else {
                     errorAlert.innerText = result.error || 'Credenciales incorrectas. Intente nuevamente.';
+                    errorAlert.classList.remove('d-none');
+                }
+            } catch (err) {
+                console.error(err);
+                errorAlert.innerText = 'Ocurrió un error en el servidor. Reintente.';
+                errorAlert.classList.remove('d-none');
+            }
+        });
+
+        document.getElementById('passwordChangeForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const errorAlert = document.getElementById('errorAlert');
+            errorAlert.classList.add('d-none');
+
+            const new_pass = document.getElementById('new_password').value;
+            const new_pass_confirm = document.getElementById('new_password_confirm').value;
+
+            if (new_pass !== new_pass_confirm) {
+                errorAlert.innerText = 'Las contraseñas no coinciden.';
+                errorAlert.classList.remove('d-none');
+                return;
+            }
+
+            const data = {
+                username: document.getElementById('pc_username').value,
+                current_password: document.getElementById('pc_current_password').value,
+                new_password: new_pass
+            };
+
+            const csrfToken = document.querySelector('#passwordChangeForm [name=csrfmiddlewaretoken]').value;
+
+            try {
+                const response = await fetch('{% url "cambiar_password_inicial" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    window.location.href = '{% url "index" %}';
+                } else {
+                    errorAlert.innerText = result.error || 'Error al cambiar contraseña.';
                     errorAlert.classList.remove('d-none');
                 }
             } catch (err) {

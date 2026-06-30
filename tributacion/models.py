@@ -182,3 +182,16 @@ class AuditoriaLog(models.Model):
     def __str__(self):
         usuario = self.id_usuario.username if self.id_usuario else "Sistema"
         return f"{self.tipo_operacion} - {usuario} - {self.fecha_hora.strftime('%Y-%m-%d %H:%M:%S')}"
+
+
+class PerfilUsuario(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='perfil')
+    cambio_password_obligatorio = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'perfil_usuario'
+        verbose_name = 'Perfil de Usuario'
+        verbose_name_plural = 'Perfiles de Usuario'
+
+    def __str__(self):
+        return f"Perfil de {self.user.username}"
